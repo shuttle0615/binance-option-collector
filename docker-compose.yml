@@ -1,0 +1,72 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: binance_redis_v2_compact
+    ports:
+      - "6381:6379"  # Different port to avoid conflict
+    volumes:
+      - redis_data_v2_compact:/data
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    networks:
+      - binance_network_v2_compact
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  collector:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile
+    container_name: binance_collector_v2_compact
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_STREAM_KEY=binance:options:markprice
+    restart: unless-stopped
+    networks:
+      - binance_network_v2_compact
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  persister:
+    build:
+      context: ./persister
+      dockerfile: Dockerfile
+    container_name: binance_persister_v2_compact
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_STREAM_KEY=binance:options:markprice
+      - STORAGE_PATH=/data
+      - BATCH_SIZE=100
+      - FLUSH_INTERVAL=10
+      - GOOGLE_CLOUD_PROJECT=KFAC-Quant-Platform
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    networks:
+      - binance_network_v2_compact
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  binance_network_v2_compact:
+    driver: bridge
+
+volumes:
+  redis_data_v2_compact:

@@ -1,0 +1,1 @@
+0 9 * * * /app/cleanup_data.sh >> /var/log/cron.log 2>&1
