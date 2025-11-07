@@ -5,6 +5,7 @@ set -euo pipefail
 # IMPORTANT: Replace this with your actual GCS bucket path.
 GCS_BUCKET="gs://kfac-quant-db/Binance-Option"
 
+GCLOUD_BIN="/usr/bin/gcloud" 
 # The directory inside the container where the .parquet files are stored.
 DATA_DIR="/data"
 # --- End of Configuration ---
@@ -45,7 +46,7 @@ find "$DATA_DIR" -maxdepth 1 -type f -name "*.parquet" | while read -r FILE_PATH
 
     # 1. Attempt to copy the file to GCS
     echo "  -> Archiving to $GCS_BUCKET ..."
-    gcloud storage cp "$FILE_PATH" "$GCS_BUCKET/"
+    "$GCLOUD_BIN" storage cp "$FILE_PATH" "$GCS_BUCKET/"
 
     # 2. Check if the copy command was successful (exit code 0)
     if [ $? -eq 0 ]; then

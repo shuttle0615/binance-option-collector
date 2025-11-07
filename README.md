@@ -430,3 +430,9 @@ echo "--- Archive and Cleanup Complete ---"
 
 **요약:**
 버킷 주소 변경은 필수이지만, 스크립트가 `cron`에서 안정적으로 돌게 하려면 **(1) VM 서비스 계정 권한 부여**와 **(2) `gcloud` 절대 경로 사용**이 반드시 병행되어야 합니다.
+
+alias docker-compose='sudo docker run --rm \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$(pwd):/workdir" \
+    -w /workdir \
+    docker/compose:latest'
