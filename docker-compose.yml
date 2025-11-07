@@ -52,8 +52,8 @@ services:
       - BATCH_SIZE=100
       - FLUSH_INTERVAL=10
       - GOOGLE_CLOUD_PROJECT=KFAC-Quant-Platform
-    volumes:
-      - ./data:/data
+    # volumes:
+    #   - ./data:/data
     restart: unless-stopped
     networks:
       - binance_network_v2_compact
