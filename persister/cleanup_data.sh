@@ -5,7 +5,7 @@ set -euo pipefail
 # IMPORTANT: Replace this with your actual GCS bucket path.
 GCS_BUCKET="gs://kfac-quant-db/Binance-Option"
 
-GCLOUD_BIN="/usr/bin/gcloud" 
+GCLOUD_BIN="/usr/local/bin/gcloud"
 # The directory inside the container where the .parquet files are stored.
 DATA_DIR="/data"
 # --- End of Configuration ---
