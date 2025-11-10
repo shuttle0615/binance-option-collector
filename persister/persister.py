@@ -274,9 +274,9 @@ class OptionDataPersisterV2:
                     print(f"📊 Processed {self.message_count} messages so far")
 
                 # Periodic cleanup of expired options (every hour)
-                if time.time() - self.last_cleanup_time > 3600:
-                    self.cleanup_expired_options()
-                    self.last_cleanup_time = time.time()
+                # if time.time() - self.last_cleanup_time > 3600:
+                #     self.cleanup_expired_options()
+                #     self.last_cleanup_time = time.time()
 
             except KeyboardInterrupt:
                 print("\n\nStopping persister...")
