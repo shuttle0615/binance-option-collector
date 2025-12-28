@@ -6,25 +6,29 @@ This is the **simplest** and **most efficient** version of the collector.
 
 ### Key Insight
 
-Binance's `BTC@markPrice` stream is **ONE** stream that broadcasts mark prices for **ALL** BTC options simultaneously. No need to:
+Binance's `btcusdt@optionMarkPrice` stream is **ONE** stream that broadcasts mark prices for **ALL** BTC options simultaneously. No need to:
 - Call REST API to get option list
 - Create multiple WebSocket connections
 - Subscribe to individual symbols
 
-Just connect to `BTC@markPrice` and receive everything!
+Just connect to `btcusdt@optionMarkPrice` and receive everything - including Greeks, implied volatility, and order book data!
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Binance WebSocket                                          │
-│  wss://nbstream.binance.com/eoptions/stream                 │
-│  ?streams=BTC@markPrice                                     │
-│                                                             │
-│  Broadcasts ALL BTC option mark prices every few seconds   │
-└──────────────────┬──────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│  Binance WebSocket                                                │
+│  wss://fstream.binance.com/market/stream                          │
+│  ?streams=btcusdt@optionMarkPrice                                 │
+│                                                                   │
+│  Broadcasts ALL BTC options every 1s with:                       │
+│  • Mark prices + Index price                                     │
+│  • Greeks (delta, gamma, theta, vega)                            │
+│  • Implied volatility (bid/ask/mark)                             │
+│  • Order book (best bid/ask + quantities)                        │
+└──────────────────┬────────────────────────────────────────────────┘
                    │
                    │ Single WebSocket connection
                    ▼
@@ -32,10 +36,11 @@ Just connect to `BTC@markPrice` and receive everything!
         │   Collector          │
         │  - Parse symbol      │
         │  - Extract metadata  │
+        │  - Capture 23 fields │
         │  - Push to Redis     │
         └──────────┬───────────┘
                    │
-                   │ Redis Streams
+                   │ Redis Streams (23 fields per message)
                    ▼
         ┌──────────────────────┐
         │   Redis              │
@@ -48,6 +53,7 @@ Just connect to `BTC@markPrice` and receive everything!
         │   Persister          │
         │  - Read from Redis   │
         │  - Write Parquet     │
+        │  - 27 columns        │
         │  - Auto-cleanup      │
         └──────────┬───────────┘
                    │
@@ -56,6 +62,7 @@ Just connect to `BTC@markPrice` and receive everything!
         │   data/              │
         │  - BTC-251226-*.parq │
         │  - One file per opt  │
+        │  - 27 columns each   │
         └──────────────────────┘
 ```
 
@@ -112,23 +119,33 @@ docker-compose down -v
 
 ### **WebSocket Message Format**
 
-The `BTC@markPrice` stream sends messages like this:
+The `btcusdt@optionMarkPrice` stream sends messages like this:
 
 ```json
 {
-  "stream": "BTC@markPrice",
+  "stream": "btcusdt@optionMarkPrice",
   "data": [
     {
-      "e": "markPrice",
-      "E": 1762422727047,
-      "s": "BTC-251226-100000-C",
-      "mp": "8637.4"
-    },
-    {
-      "e": "markPrice",
-      "E": 1762422727047,
-      "s": "BTC-251226-100000-P",
-      "mp": "5069.9"
+      "s": "BTC-251120-126000-C",    // Symbol
+      "mp": "770.543",               // Mark price
+      "E": 1762867543321,            // Event time
+      "e": "markPrice",              // Event type
+      "i": "104334.60217391",        // Index price
+      "P": "0.000",                  // Estimated Settle Price
+      "bo": "0.000",                 // Best buy price
+      "ao": "900.000",               // Best sell price
+      "bq": "0.0000",                // Best buy quantity
+      "aq": "0.2000",                // Best sell quantity
+      "b": "-1.0",                   // Buy Implied volatility
+      "a": "0.98161161",             // Sell Implied volatility
+      "hl": "924.652",               // Buy Maximum price
+      "ll": "616.435",               // Sell Minimum price
+      "vo": "0.9408058",             // Mark Implied Volatility
+      "rf": "0.0",                   // Risk free rate
+      "d": "0.11111964",             // Delta
+      "t": "-164.26702615",          // Theta
+      "g": "0.00001245",             // Gamma
+      "v": "30.63855919"             // Vega
     },
     ...
   ]
@@ -136,23 +153,63 @@ The `BTC@markPrice` stream sends messages like this:
 ```
 
 **Key points:**
+- WebSocket URL: `wss://fstream.binance.com/market/stream?streams=btcusdt@optionMarkPrice`
 - `data` is an **ARRAY** of mark prices (not a single object)
 - Broadcasts mark prices for ALL BTC options at once
-- Updates every few seconds
+- Updates every 1000ms (1 second)
 - Symbol format: `BTC-YYMMDD-STRIKE-TYPE`
+- **NEW**: Now includes Greeks, implied volatility, and order book data!
 
 ### **Parquet File Schema**
 
-Each `data/SYMBOL.parquet` file contains:
+Each `data/SYMBOL.parquet` file contains **27 columns** with comprehensive options data:
 
+#### Basic Information
 | Column | Type | Description |
 |--------|------|-------------|
 | timestamp | timestamp[ms] | Collection time (UTC) |
-| symbol | string | Option symbol |
-| mark_price | float64 | Mark price (fair value) |
+| symbol | string | Option symbol (e.g., BTC-251226-100000-C) |
+| event_type | string | Event type (always "markPrice") |
 | strike_price | int32 | Strike price |
 | option_type | string | CALL or PUT |
 | expiry_date | date32 | Expiration date |
+
+#### Pricing Data
+| Column | Type | Description |
+|--------|------|-------------|
+| mark_price | float64 | Mark price (fair value) |
+| index_price | float64 | Underlying BTC index price |
+| estimated_settle_price | float64 | Estimated settlement price |
+
+#### Order Book / Liquidity
+| Column | Type | Description |
+|--------|------|-------------|
+| best_bid_price | float64 | Best buy price |
+| best_ask_price | float64 | Best sell price |
+| best_bid_quantity | float64 | Best buy quantity |
+| best_ask_quantity | float64 | Best sell quantity |
+| high_price_limit | float64 | Maximum allowed price |
+| low_price_limit | float64 | Minimum allowed price |
+
+#### Implied Volatility
+| Column | Type | Description |
+|--------|------|-------------|
+| bid_iv | float64 | Buy-side implied volatility |
+| ask_iv | float64 | Sell-side implied volatility |
+| mark_iv | float64 | Mark implied volatility |
+
+#### Risk Metrics
+| Column | Type | Description |
+|--------|------|-------------|
+| risk_free_rate | float64 | Risk-free interest rate |
+
+#### Greeks (Option Sensitivity)
+| Column | Type | Description |
+|--------|------|-------------|
+| delta | float64 | Delta (price sensitivity to underlying) |
+| gamma | float64 | Gamma (delta sensitivity to underlying) |
+| theta | float64 | Theta (time decay) |
+| vega | float64 | Vega (volatility sensitivity) |
 
 ---
 
@@ -182,11 +239,12 @@ df_all = pd.DataFrame(all_data)
 print(f"\nTotal options tracked: {len(df_all)}")
 ```
 
-### **Put/Call Analysis**
+### **Put/Call Sentiment Analysis**
 
 ```python
-# Assume BTC price is ~$103,000
-btc_price = 103000
+# Use actual BTC index price from the data
+btc_price = df_all['index_price'].iloc[0]
+print(f"Current BTC Index Price: ${btc_price:,.2f}")
 
 # Filter OTM options
 otm_calls = df_all[
@@ -211,6 +269,70 @@ if call_avg > put_avg:
     print("→ BULLISH sentiment")
 else:
     print("→ BEARISH sentiment")
+```
+
+### **Implied Volatility Analysis**
+
+```python
+# Analyze IV skew between calls and puts
+calls = df_all[df_all['option_type'] == 'CALL']
+puts = df_all[df_all['option_type'] == 'PUT']
+
+avg_call_iv = calls['mark_iv'].mean()
+avg_put_iv = puts['mark_iv'].mean()
+
+print(f"Average Call IV: {avg_call_iv:.2%}")
+print(f"Average Put IV: {avg_put_iv:.2%}")
+print(f"IV Skew (Put - Call): {(avg_put_iv - avg_call_iv):.2%}")
+
+# Analyze bid-ask IV spread (measure of uncertainty)
+df_all['iv_spread'] = df_all['ask_iv'] - df_all['bid_iv']
+print(f"\nAverage IV Bid-Ask Spread: {df_all['iv_spread'].mean():.2%}")
+```
+
+### **Greeks Risk Analysis**
+
+```python
+# Portfolio delta exposure
+total_delta = df_all['delta'].sum()
+print(f"Total Delta Exposure: {total_delta:.4f}")
+
+# Find options with highest gamma (most sensitive to price moves)
+high_gamma = df_all.nlargest(10, 'gamma')[['symbol', 'strike_price', 'gamma', 'delta']]
+print("\nTop 10 Highest Gamma Options:")
+print(high_gamma)
+
+# Theta analysis (time decay)
+avg_call_theta = calls['theta'].mean()
+avg_put_theta = puts['theta'].mean()
+print(f"\nAverage Call Theta (daily decay): ${avg_call_theta:.2f}")
+print(f"Average Put Theta (daily decay): ${avg_put_theta:.2f}")
+
+# Vega exposure (volatility risk)
+total_vega = df_all['vega'].sum()
+print(f"\nTotal Vega Exposure: {total_vega:.2f}")
+print("(1% increase in IV would change portfolio value by ${:.2f})".format(total_vega))
+```
+
+### **Liquidity Analysis**
+
+```python
+# Calculate bid-ask spread
+df_all['spread'] = df_all['best_ask_price'] - df_all['best_bid_price']
+df_all['spread_pct'] = (df_all['spread'] / df_all['mark_price']) * 100
+
+# Find most liquid options
+liquid_options = df_all.nsmallest(10, 'spread_pct')[
+    ['symbol', 'mark_price', 'spread', 'spread_pct', 'best_bid_quantity', 'best_ask_quantity']
+]
+print("Top 10 Most Liquid Options (lowest spread %):")
+print(liquid_options)
+
+# Calculate total liquidity
+total_bid_liquidity = (df_all['best_bid_price'] * df_all['best_bid_quantity']).sum()
+total_ask_liquidity = (df_all['best_ask_price'] * df_all['best_ask_quantity']).sum()
+print(f"\nTotal Bid Liquidity: ${total_bid_liquidity:,.2f}")
+print(f"Total Ask Liquidity: ${total_ask_liquidity:,.2f}")
 ```
 
 ---
