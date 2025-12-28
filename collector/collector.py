@@ -18,7 +18,8 @@ from typing import Dict
 
 class BinanceOptionsCollectorV2:
     def __init__(self):
-        self.ws_url = 'wss://nbstream.binance.com/eoptions/stream?streams=BTC@markPrice'
+        # Updated WebSocket URL - using combined stream format
+        self.ws_url = 'wss://fstream.binance.com/market/stream?streams=btcusdt@optionMarkPrice'
 
         # Redis connection
         redis_host = os.getenv('REDIS_HOST', 'localhost')
@@ -34,7 +35,7 @@ class BinanceOptionsCollectorV2:
         print(f"  WebSocket URL: {self.ws_url}")
         print(f"  Redis: {redis_host}:{redis_port}")
         print(f"  Stream Key: {self.stream_key}")
-        print(f"  Stream: BTC@markPrice (single stream, ALL options)")
+        print(f"  Stream: btcusdt@optionMarkPrice (single stream, ALL options)")
 
     def parse_symbol(self, symbol: str) -> Dict:
         """
@@ -69,10 +70,9 @@ class BinanceOptionsCollectorV2:
             return {}
 
     async def process_mark_price(self, mark_data: Dict):
-        """Process a single mark price event and push to Redis"""
+        """Process a single mark price event and push to Redis - now captures ALL fields"""
         try:
             symbol = mark_data['s']
-            mark_price = mark_data['mp']
             timestamp = mark_data['E']
 
             # Track unique symbols
@@ -84,14 +84,46 @@ class BinanceOptionsCollectorV2:
             # Parse symbol metadata
             metadata = self.parse_symbol(symbol)
 
-            # Prepare enriched data
+            # Prepare enriched data with ALL available fields
             enriched_data = {
+                # Basic fields
                 'symbol': symbol,
-                'mark_price': mark_price,
                 'timestamp': str(timestamp),
+                'event_type': mark_data.get('e', 'markPrice'),
+
+                # Parsed metadata
                 'strike_price': str(metadata.get('strike_price', 0)),
                 'option_type': metadata.get('option_type', 'UNKNOWN'),
                 'expiry_date': metadata.get('expiry_date', ''),
+
+                # Pricing fields
+                'mark_price': mark_data.get('mp', '0'),
+                'index_price': mark_data.get('i', '0'),
+                'estimated_settle_price': mark_data.get('P', '0'),
+
+                # Best bid/ask
+                'best_bid_price': mark_data.get('bo', '0'),
+                'best_ask_price': mark_data.get('ao', '0'),
+                'best_bid_quantity': mark_data.get('bq', '0'),
+                'best_ask_quantity': mark_data.get('aq', '0'),
+
+                # Implied volatility
+                'bid_iv': mark_data.get('b', '0'),
+                'ask_iv': mark_data.get('a', '0'),
+                'mark_iv': mark_data.get('vo', '0'),
+
+                # Price limits
+                'high_price_limit': mark_data.get('hl', '0'),
+                'low_price_limit': mark_data.get('ll', '0'),
+
+                # Risk metrics
+                'risk_free_rate': mark_data.get('rf', '0'),
+
+                # Greeks
+                'delta': mark_data.get('d', '0'),
+                'theta': mark_data.get('t', '0'),
+                'gamma': mark_data.get('g', '0'),
+                'vega': mark_data.get('v', '0'),
             }
 
             # Push to Redis Stream
@@ -103,6 +135,7 @@ class BinanceOptionsCollectorV2:
 
         except Exception as e:
             print(f"Error processing mark price: {e}")
+            print(f"Mark data: {mark_data}")
 
     async def listen_stream(self):
         """Listen to BTC@markPrice stream"""

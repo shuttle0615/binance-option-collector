@@ -45,14 +45,46 @@ class OptionDataPersisterV2:
         self.last_flush_time = time.time()
         self.last_cleanup_time = time.time()
 
-        # Define Parquet schema for mark price data
+        # Define Parquet schema for mark price data - EXPANDED with all fields
         self.schema = pa.schema([
+            # Basic fields
             ('timestamp', pa.timestamp('ms')),
             ('symbol', pa.string()),
-            ('mark_price', pa.float64()),
+            ('event_type', pa.string()),
+
+            # Parsed metadata
             ('strike_price', pa.int32()),
             ('option_type', pa.string()),
             ('expiry_date', pa.date32()),
+
+            # Pricing fields
+            ('mark_price', pa.float64()),
+            ('index_price', pa.float64()),
+            ('estimated_settle_price', pa.float64()),
+
+            # Best bid/ask
+            ('best_bid_price', pa.float64()),
+            ('best_ask_price', pa.float64()),
+            ('best_bid_quantity', pa.float64()),
+            ('best_ask_quantity', pa.float64()),
+
+            # Implied volatility
+            ('bid_iv', pa.float64()),
+            ('ask_iv', pa.float64()),
+            ('mark_iv', pa.float64()),
+
+            # Price limits
+            ('high_price_limit', pa.float64()),
+            ('low_price_limit', pa.float64()),
+
+            # Risk metrics
+            ('risk_free_rate', pa.float64()),
+
+            # Greeks
+            ('delta', pa.float64()),
+            ('theta', pa.float64()),
+            ('gamma', pa.float64()),
+            ('vega', pa.float64()),
         ])
 
         print(f"Persister V2 initialized:")
@@ -82,7 +114,7 @@ class OptionDataPersisterV2:
                 raise
 
     def parse_message(self, message_data: Dict) -> Dict:
-        """Parse Redis message into structured format"""
+        """Parse Redis message into structured format - now includes ALL fields"""
         try:
             # Convert timestamp from string to int
             timestamp_ms = int(message_data['timestamp'])
@@ -93,13 +125,52 @@ class OptionDataPersisterV2:
             # Parse expiry_date
             expiry_dt = datetime.strptime(message_data['expiry_date'], '%Y-%m-%d').date()
 
+            # Helper function to safely convert to float
+            def safe_float(value, default=0.0):
+                try:
+                    return float(value) if value and value != '0' else default
+                except (ValueError, TypeError):
+                    return default
+
             return {
+                # Basic fields
                 'timestamp': dt,
                 'symbol': message_data['symbol'],
-                'mark_price': float(message_data['mark_price']),
+                'event_type': message_data.get('event_type', 'markPrice'),
+
+                # Parsed metadata
                 'strike_price': int(message_data['strike_price']),
                 'option_type': message_data['option_type'],
                 'expiry_date': expiry_dt,
+
+                # Pricing fields
+                'mark_price': safe_float(message_data.get('mark_price')),
+                'index_price': safe_float(message_data.get('index_price')),
+                'estimated_settle_price': safe_float(message_data.get('estimated_settle_price')),
+
+                # Best bid/ask
+                'best_bid_price': safe_float(message_data.get('best_bid_price')),
+                'best_ask_price': safe_float(message_data.get('best_ask_price')),
+                'best_bid_quantity': safe_float(message_data.get('best_bid_quantity')),
+                'best_ask_quantity': safe_float(message_data.get('best_ask_quantity')),
+
+                # Implied volatility
+                'bid_iv': safe_float(message_data.get('bid_iv')),
+                'ask_iv': safe_float(message_data.get('ask_iv')),
+                'mark_iv': safe_float(message_data.get('mark_iv')),
+
+                # Price limits
+                'high_price_limit': safe_float(message_data.get('high_price_limit')),
+                'low_price_limit': safe_float(message_data.get('low_price_limit')),
+
+                # Risk metrics
+                'risk_free_rate': safe_float(message_data.get('risk_free_rate')),
+
+                # Greeks
+                'delta': safe_float(message_data.get('delta')),
+                'theta': safe_float(message_data.get('theta')),
+                'gamma': safe_float(message_data.get('gamma')),
+                'vega': safe_float(message_data.get('vega')),
             }
         except Exception as e:
             print(f"Error parsing message: {e}")
